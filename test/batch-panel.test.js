@@ -10,11 +10,13 @@ const text=n=>n&&typeof n==='object'?n.children.map(text).join(''):String(n??'')
 function nodes(tree,p){const found=[];function visit(n){if(!n||typeof n!=='object')return;if(p(n))found.push(n);n.children.forEach(visit);}visit(tree);return found;}
 async function harness(handler){
   let cursor=0,slots=[],effects=[],timers=[],calls=[];
-  const React={createElement:(tag,props,...children)=>({tag,props:props??{},children:children.flat(Infinity)}),useRef:value=>{const i=cursor++;slots[i]??={current:value};return slots[i];},useState:initial=>{const i=cursor++;slots[i]??={value:typeof initial==='function'?initial():initial};return [slots[i].value,v=>slots[i].value=typeof v==='function'?v(slots[i].value):v];},useEffect:(fn,deps)=>{const i=cursor++;if(!slots[i]||deps.some((d,j)=>d!==slots[i].deps[j])){slots[i]?.cleanup?.();slots[i]={deps};effects.push(()=>slots[i].cleanup=fn());}}};
+  const React={createElement:(tag,props,...children)=>{const flat=children.flat(Infinity);return {tag,props:{...(props??{}),children:flat},children:flat};},useRef:value=>{const i=cursor++;slots[i]??={current:value};return slots[i];},useState:initial=>{const i=cursor++;slots[i]??={value:typeof initial==='function'?initial():initial};return [slots[i].value,v=>slots[i].value=typeof v==='function'?v(slots[i].value):v];},useEffect:(fn,deps)=>{const i=cursor++;if(!slots[i]||deps.some((d,j)=>d!==slots[i].deps[j])){slots[i]?.cleanup?.();slots[i]={deps};effects.push(()=>slots[i].cleanup=fn());}}};
   const box={setTimeout:fn=>{timers.push(fn);return fn;},clearTimeout:fn=>{timers=timers.filter(x=>x!==fn);}};
   vm.runInNewContext(source+'\nglobalThis.factory=createBatchPanel;',box);
-  const Component=box.factory(React,React.createElement);let call=async(...args)=>{calls.push(args);return handler(...args);};
-  return {calls,render(){cursor=0;const tree=Component({call,enabled:true});effects.splice(0).forEach(f=>f());return tree;},poll(){timers.shift()?.();},replace(next){call=async(...args)=>{calls.push(args);return next(...args);};},unmount(){slots.forEach(s=>s.cleanup?.());}};
+  const Button=props=>{const {children=[],...rest}=props;return React.createElement('button',{type:'button',...rest},...(Array.isArray(children)?children:[children]));};
+  const expand=node=>{if(!node||typeof node!=='object')return node;if(node.tag===Button)return expand(Button(node.props));return {...node,children:node.children.map(expand)};};
+  const Component=box.factory(React,React.createElement,{Button});let call=async(...args)=>{calls.push(args);return handler(...args);};
+  return {calls,render(){cursor=0;const tree=Component({call,enabled:true});effects.splice(0).forEach(f=>f());return expand(tree);},poll(){timers.shift()?.();},replace(next){call=async(...args)=>{calls.push(args);return next(...args);};},unmount(){slots.forEach(s=>s.cleanup?.());}};
 }
 const checkbox=tree=>nodes(tree,n=>n.tag==='input')[0];
 const button=tree=>nodes(tree,n=>n.tag==='button')[0];

@@ -2,12 +2,17 @@ window.__ModuleLoader__.load({
   id: 'dsh-topic-for-each-turn',
   factory: require => {
     const React = require('react'), h = React.createElement;
+    // Reuse the official control primitives so the settings page matches DSH's
+    // own settings pages (heights, radii, hover/focus rings, disabled states).
+    let primitives;
+    try { primitives = require('@deepseek-ai/dsh-client-ui-primitives'); } catch { primitives = undefined; }
+    const UI = { Button: primitives?.Button };
     const ID = 'dsh-topic-for-each-turn/topics', KIND = 'turn-topics';
-    const CLIENT_VERSION = '0.1.0-experimental.15';
+    const CLIENT_VERSION = '0.1.0-experimental.16';
     const UPGRADE_MESSAGE = '主题插件前端与后台版本不一致，后台尚未加载整理接口。请完整退出并重新打开 DSH，随后刷新此页面；仅刷新页面不能更新后台。已有主题会保留。';
     /* PREVIEW_ADAPTER */
     /* SETTINGS_PANEL */
-    const TopicSettings = createSettingsPanel(React, h);
+    const TopicSettings = createSettingsPanel(React, h, { Button: UI.Button, version: CLIENT_VERSION });
     function apply(ctx) {
       const call = async (endpoint, sessionId, payload = {}) => {
         let result;
@@ -656,7 +661,41 @@ window.__ModuleLoader__.load({
 .dsh-turn-topics .topic-protect-note{font-size:11px;line-height:1.4;color:var(--dsw-alias-label-tertiary,GrayText);margin:0}
 .dsh-turn-topics .topic-form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}
 .dsh-turn-topics .topic-pagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l3,rgba(128,128,128,0.18));font-size:12px;color:var(--dsw-alias-label-secondary,#666)}
-.dsh-turn-topics .topic-page-info{font-variant-numeric:tabular-nums}`;
+.dsh-turn-topics .topic-page-info{font-variant-numeric:tabular-nums}
+/* Settings page: same metrics as DSH's own settings pages — hairline cards,
+   36px controls, label above control, muted 12px hints, actions bottom-right. */
+.dsh-turn-topics.topic-settings-page{height:auto;overflow:visible;box-sizing:border-box;font-family:inherit;max-width:720px;padding:0;display:grid;gap:20px;background:transparent}
+.dsh-turn-topics.topic-settings-page h2{font-size:20px;line-height:1.3;margin:0;font-weight:600;letter-spacing:-0.01em;color:var(--dsw-alias-label-primary,CanvasText)}
+.dsh-turn-topics.topic-settings-page h3{font-size:15px;line-height:1.35;margin:0;font-weight:600;color:var(--dsw-alias-label-primary,CanvasText)}
+.dsh-turn-topics .topic-page-head{display:grid;gap:6px}
+.dsh-turn-topics .topic-page-desc{font-size:13px;line-height:1.6;margin:0;color:var(--dsw-alias-label-secondary,#666);max-width:62ch}
+.dsh-turn-topics .topic-card{border:1px solid var(--dsw-alias-border-l3,rgba(128,128,128,0.18));border-radius:var(--dsw-radius-lg,12px);padding:16px 18px;display:grid;gap:14px;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,0.03));box-sizing:border-box}
+.dsh-turn-topics .topic-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.dsh-turn-topics .topic-card-desc{font-size:12.5px;line-height:1.55;margin:4px 0 0;color:var(--dsw-alias-label-tertiary,GrayText);max-width:62ch}
+.dsh-turn-topics .topic-badge{align-self:center;font-size:11.5px;font-weight:500;line-height:1;padding:5px 9px;border-radius:999px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#666);background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,0.12));border:1px solid var(--dsw-alias-border-l3,rgba(128,128,128,0.2));max-width:32ch;overflow:hidden;text-overflow:ellipsis}
+.dsh-turn-topics .topic-badge.is-empty,.dsh-turn-topics .topic-badge.is-active{color:var(--dsw-alias-state-business-primary,#0969da);border-color:rgba(9,105,218,0.35);background:rgba(9,105,218,0.08)}
+.dsh-turn-topics .topic-form{display:grid;gap:14px}
+.dsh-turn-topics .topic-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px 16px}
+.dsh-turn-topics .topic-field{display:grid;gap:6px;min-width:0}
+.dsh-turn-topics .topic-field-label{font-size:12.5px;font-weight:500;color:var(--dsw-alias-label-primary,CanvasText)}
+.dsh-turn-topics .topic-field-hint{font-size:11.5px;line-height:1.5;margin:0;color:var(--dsw-alias-label-tertiary,GrayText)}
+.dsh-turn-topics.topic-settings-page .topic-input{min-height:36px;padding:6px 10px;border-radius:var(--dsw-radius-md,8px);font-size:13px}
+.dsh-turn-topics .topic-check{display:flex;align-items:flex-start;gap:9px;font-size:12.5px;line-height:1.55;color:var(--dsw-alias-label-secondary,#555);cursor:pointer}
+.dsh-turn-topics .topic-check input{margin:2px 0 0;flex-shrink:0}
+.dsh-turn-topics .topic-form-status{font-size:12px;line-height:1.5;margin:0;color:var(--dsw-alias-label-tertiary,GrayText)}
+.dsh-turn-topics .topic-card-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l3,rgba(128,128,128,0.16))}
+.dsh-turn-topics .topic-card-foot .topic-form-status{flex:1 1 220px;min-width:0}
+.dsh-turn-topics .topic-card-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.dsh-turn-topics .topic-card-hint{font-size:11.5px;line-height:1.55;margin:0;color:var(--dsw-alias-label-tertiary,GrayText)}
+.dsh-turn-topics .topic-progress{width:100%;height:6px;appearance:none;border:none;border-radius:999px;overflow:hidden;background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,0.16))}
+.dsh-turn-topics .topic-progress::-webkit-progress-bar{background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,0.16))}
+.dsh-turn-topics .topic-progress::-webkit-progress-value{background:var(--dsw-alias-state-business-primary,#0969da);border-radius:999px}
+.dsh-turn-topics .topic-errors{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}
+.dsh-turn-topics .topic-errors>summary{cursor:pointer;user-select:none;font-weight:500}
+.dsh-turn-topics .topic-errors ul{margin:8px 0 0;padding-left:18px;line-height:1.6;max-height:180px;overflow:auto}
+.dsh-turn-topics .topic-page-foot{font-size:11.5px;color:var(--dsw-alias-label-tertiary,GrayText);font-variant-numeric:tabular-nums;padding-top:4px}
+.dsh-turn-topics .topic-alert-success{background:rgba(26,127,55,0.08);border:1px solid rgba(26,127,55,0.32);color:var(--dsw-alias-label-primary,CanvasText)}
+.dsh-turn-topics .topic-btn-outline{background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,0.36));color:var(--dsw-alias-label-primary,CanvasText)}`;
         document.head.appendChild(style);
         return () => { activeJumps.clear(); style.remove(); };
       });

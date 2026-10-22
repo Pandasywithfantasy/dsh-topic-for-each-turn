@@ -1,6 +1,13 @@
 // Embedded by the build inside the client factory; deliberately no module imports/exports.
-function createSettingsPanel(React, h) {
-  const BatchPanel = createBatchPanel(React, h);
+// Rendered as a page of the official settings surface, so it follows the same
+// metrics as DSH's own settings pages: 20px page title, cards separated by
+// hairlines, 36px controls, label above control, hint below at 12px.
+function createSettingsPanel(React, h, UI = {}) {
+  const Button = UI.Button ?? function FallbackButton({ variant = 'ghost', size = 'md', className, children, ...rest }) {
+    const tone = variant === 'primary' ? ' topic-btn-primary' : variant === 'outline' ? ' topic-btn-outline' : '';
+    return h('button', { type: 'button', ...rest, className: `topic-btn${tone}${size === 'sm' ? ' topic-btn-sm' : ''}${className ? ' ' + className : ''}` }, children);
+  };
+  const BatchPanel = createBatchPanel(React, h, UI);
   const empty = scope => ({ scope, state: null, draft: null, saved: null, pending: '', error: '', notice: '' });
   const modelsFor = (state, provider) => (state.providers || []).find(item => item.id === provider)?.models || [];
   const effortsFor = (state, draft) => {
@@ -64,6 +71,7 @@ function createSettingsPanel(React, h) {
     const efforts = state ? effortsFor(state, draft) : [];
     const busy = Boolean(view.pending);
     const writable = state?.writable === true;
+    const configured = state?.configured === true;
     const dirty = Boolean(state?.configured !== true || (view.draft && !equal(view.draft, view.saved)));
     const valid = Boolean(draft.provider && draft.model && Number.isInteger(Number(draft.maxTokens)) && Number(draft.maxTokens) >= 80 && Number(draft.maxTokens) <= 4096);
     const disabled = !writable || busy;
@@ -77,60 +85,89 @@ function createSettingsPanel(React, h) {
       if (!writable || busy || !dirty || !valid) return;
       void request('settings-save', { provider: draft.provider, model: draft.model, reasoningEffort: efforts.includes(draft.reasoningEffort) ? draft.reasoningEffort : '', maxTokens: Number(draft.maxTokens) });
     };
-    const field = (label, control, note) => h('label', { className: 'topic-form-field' }, h('span', { className: 'topic-form-label' }, label), control, note && h('span', { className: 'topic-note' }, note));
+    const field = (label, id, control, hint) => h('div', { className: 'topic-field' },
+      h('label', { className: 'topic-field-label', htmlFor: id }, label),
+      control,
+      hint && h('p', { className: 'topic-field-hint', id: `${id}-hint` }, hint)
+    );
     const status = busy ? (view.pending === 'settings-save' ? '正在保存设置…' : '正在加载配置…')
       : !state ? '配置尚未加载，请重新加载。'
       : !writable ? '当前配置不可写，已禁用保存。'
-      : state.configured !== true ? '尚未选择模型：选好服务商与模型后保存，主题生成才会开始。'
+      : !configured ? '尚未选择模型：选好服务商与模型后保存，主题生成才会开始。'
       : !valid ? '请选择服务商和模型，并填写 80–4096 之间的整数。'
       : dirty ? '有未保存的更改。' : '设置未更改，无需保存。';
+    const summary = configured ? `${draft.provider} · ${draft.model}` : '未配置';
 
-    return h('div', { className: 'dsh-turn-topics topic-settings-page', style: { display: 'grid', gap: 16, maxWidth: 640, padding: 16 } },
-      h('h2', null, '轮次主题'),
-      h('p', { className: 'topic-note' }, '全局设置，无需打开会话；仅影响轮次主题请求，不修改聊天默认模型。'),
-      h('p', { className: 'topic-note' }, '服务商与模型来自当前 DSH 已配置的模型列表，直接复用其凭证，无需在此填写密钥。'),
-      h('p', { className: 'topic-note' }, '保存后写入插件自己的设置文件，覆盖 profile 补丁中的默认值；聊天默认模型与 profile 补丁本身不会被修改。'),
-      h('section', { style: { display: 'grid', gap: 12 }, 'aria-busy': busy },
-        h('h3', null, '模型设置'),
-        state?.hostVersion && h('p', { className: 'topic-note' }, `后台版本：${state.hostVersion}`),
-        view.error && h('div', { className: 'topic-alert topic-alert-error', role: 'alert' }, `错误：${view.error}`),
-        view.notice && h('div', { className: 'topic-alert', role: 'status' }, h('span', null, `✓ ${view.notice}`), h('button', { type: 'button', className: 'topic-alert-close', 'aria-label': '关闭提示', onClick: () => update({ notice: '' }) }, '×')),
-        state && !writable && h('div', { className: 'topic-alert topic-alert-warn', role: 'status' }, '⚠ 当前配置不可写，仍可重新加载。'),
-        h('form', { onSubmit: submit, style: { display: 'grid', gap: 12 } },
-          field('服务商', h('select', { className: 'topic-input', value: draft.provider, disabled, onChange: event => {
-            const provider = event.target.value;
-            const model = modelsFor(state, provider)[0]?.id || '';
-            change({ provider, model, reasoningEffort: '' });
-          } },
-            !draft.provider && h('option', { value: '' }, '请选择服务商'),
-            draft.provider && !providers.some(item => item.id === draft.provider) && h('option', { value: draft.provider }, `${draft.provider}（当前未列出）`),
-            ...providers.map(item => h('option', { key: item.id, value: item.id }, item.id))
-          )),
-          field('模型', h('select', { className: 'topic-input', value: draft.model, disabled, onChange: event => {
-            const model = event.target.value;
-            const nextEfforts = effortsFor(state, { ...draft, model });
-            change({ model, reasoningEffort: nextEfforts.includes(draft.reasoningEffort) ? draft.reasoningEffort : '' });
-          } },
-            !draft.model && h('option', { value: '' }, '请选择模型'),
-            draft.model && !models.some(item => item.id === draft.model) && h('option', { value: draft.model }, `${draft.model}（当前未列出）`),
-            ...models.map(item => h('option', { key: item.id, value: item.id }, item.name || item.id))
-          )),
-          draft.model && !models.some(item => item.id === draft.model) && h('div', { className: 'topic-alert topic-alert-warn', role: 'status' }, '⚠ 当前模型未列在服务商模型列表中，已保留配置；请确认该模型名受支持。'),
-          field('推理强度', h('select', { className: 'topic-input', value: efforts.includes(draft.reasoningEffort) ? draft.reasoningEffort : '', disabled: disabled || efforts.length === 0, onChange: event => change({ reasoningEffort: event.target.value }) },
-            h('option', { value: '' }, '自动'),
-            ...efforts.map(value => h('option', { key: value, value }, value))
-          ), efforts.length ? '选项以当前模型支持的推理强度为准。' : '当前模型未声明推理强度支持，使用自动并保存空值。'),
-          field('最大输出 Token 数', h('input', { className: 'topic-input', type: 'number', min: 80, max: 4096, step: 1, required: true, value: draft.maxTokens, disabled, onChange: event => change({ maxTokens: event.target.value }) }), '80–4096，必须为整数。'),
-          h('p', { className: 'topic-note', role: 'status', 'aria-live': 'polite' }, status),
-          h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
-            h('button', { type: 'submit', className: 'topic-btn topic-btn-primary', disabled: disabled || !dirty || !valid }, view.pending === 'settings-save' ? '正在保存…' : '保存设置'),
-            h('button', { type: 'button', className: 'topic-btn', disabled: busy || typeof call !== 'function', onClick: () => { void request('settings-state'); } }, view.pending === 'settings-state' ? '正在加载…' : '重新加载配置')
+    return h('div', { className: 'dsh-turn-topics topic-settings-page' },
+      h('header', { className: 'topic-page-head' },
+        h('h2', null, '轮次主题'),
+        h('p', { className: 'topic-page-desc' }, '为每个已结束的轮次生成主题与结论。仅影响轮次主题请求，不修改聊天默认模型；服务商与模型来自当前 DSH 已配置的列表，插件不保存密钥。')
+      ),
+      h('section', { className: 'topic-card', 'aria-labelledby': 'topic-model-head' },
+        h('div', { className: 'topic-card-head' },
+          h('div', null, h('h3', { id: 'topic-model-head' }, '模型'), h('p', { className: 'topic-card-desc' }, '选择用于生成标题与结论的模型；保存后下一次主题请求即生效。')),
+          state && h('span', { className: 'topic-badge' + (configured ? '' : ' is-empty') }, summary)
+        ),
+        view.error && h('div', { className: 'topic-alert topic-alert-error', role: 'alert' }, h('span', null, view.error)),
+        view.notice && h('div', { className: 'topic-alert topic-alert-success', role: 'status' },
+          h('span', null, view.notice),
+          h('button', { type: 'button', className: 'topic-alert-close', 'aria-label': '关闭提示', onClick: () => update({ notice: '' }) }, '×')
+        ),
+        state && !writable && h('div', { className: 'topic-alert topic-alert-warn', role: 'status' }, '当前 DSH 未提供可读的模型配置。请先在 DSH 模型设置中添加服务商，再回到这里选择。'),
+        state && writable && !configured && h('div', { className: 'topic-alert', role: 'status' }, '选好服务商与模型后点「保存设置」，主题生成才会开始。'),
+        h('form', { className: 'topic-form', onSubmit: submit, noValidate: true },
+          h('div', { className: 'topic-form-grid' },
+            field('服务商', 'topic-provider', h('select', {
+              id: 'topic-provider', className: 'topic-input topic-select', value: draft.provider, disabled, 'aria-describedby': 'topic-provider-hint',
+              onChange: event => {
+                const provider = event.target.value;
+                change({ provider, model: modelsFor(state, provider)[0]?.id || '', reasoningEffort: '' });
+              }
+            },
+              !draft.provider && h('option', { value: '' }, '请选择服务商'),
+              draft.provider && !providers.some(item => item.id === draft.provider) && h('option', { value: draft.provider }, `${draft.provider}（未列出）`),
+              ...providers.map(item => h('option', { key: item.id, value: item.id }, item.id))
+            ), '来自 DSH 已配置的模型服务商。'),
+            field('模型', 'topic-model', h('select', {
+              id: 'topic-model', className: 'topic-input topic-select', value: draft.model, disabled, 'aria-describedby': 'topic-model-hint',
+              onChange: event => {
+                const model = event.target.value;
+                const nextEfforts = effortsFor(state, { ...draft, model });
+                change({ model, reasoningEffort: nextEfforts.includes(draft.reasoningEffort) ? draft.reasoningEffort : '' });
+              }
+            },
+              !draft.model && h('option', { value: '' }, '请选择模型'),
+              draft.model && !models.some(item => item.id === draft.model) && h('option', { value: draft.model }, `${draft.model}（未列出）`),
+              ...models.map(item => h('option', { key: item.id, value: item.id }, item.name || item.id))
+            ), '每个轮次调用一次该模型。'),
+            field('推理强度', 'topic-effort', h('select', {
+              id: 'topic-effort', className: 'topic-input topic-select', value: efforts.includes(draft.reasoningEffort) ? draft.reasoningEffort : '',
+              disabled: disabled || efforts.length === 0, 'aria-describedby': 'topic-effort-hint', onChange: event => change({ reasoningEffort: event.target.value })
+            },
+              h('option', { value: '' }, '自动'),
+              ...efforts.map(value => h('option', { key: value, value }, value))
+            ), efforts.length ? '选项以当前模型支持的推理强度为准。' : '当前模型未声明推理强度，使用「自动」。'),
+            field('最大输出 Token', 'topic-max-tokens', h('input', {
+              id: 'topic-max-tokens', className: 'topic-input', type: 'number', min: 80, max: 4096, step: 1, required: true, 'aria-describedby': 'topic-max-tokens-hint',
+              value: draft.maxTokens, disabled, onChange: event => change({ maxTokens: event.target.value })
+            }), '80–4096 的整数，默认 1024。')
           ),
-          h('p', { className: 'topic-note' }, '重新加载配置会丢弃未保存的更改。'),
-          h('p', { className: 'topic-note' }, 'INVALID_REQUEST 表示模型名或参数不受支持，不直接表示密钥失效。')
+          draft.model && !models.some(item => item.id === draft.model) && h('p', { className: 'topic-alert topic-alert-warn', role: 'status' }, '当前模型不在服务商模型列表中，已保留配置；请确认该模型名受支持。'),
+          h('div', { className: 'topic-card-foot' },
+            h('p', { className: 'topic-form-status', role: 'status', 'aria-live': 'polite' }, status),
+            h('div', { className: 'topic-card-actions' },
+              h(Button, { variant: 'outline', size: 'sm', disabled: busy || typeof call !== 'function', onClick: () => { void request('settings-state'); } }, view.pending === 'settings-state' ? '正在加载…' : '重新加载'),
+              h(Button, { variant: 'primary', size: 'sm', type: 'submit', disabled: disabled || !dirty || !valid }, view.pending === 'settings-save' ? '正在保存…' : '保存设置')
+            )
+          ),
+          h('p', { className: 'topic-card-hint' }, '重新加载会丢弃未保存的更改。INVALID_REQUEST 表示模型名或参数不受支持，不直接表示密钥失效。')
         )
       ),
-      h(BatchPanel, { call, enabled: state?.batchSupported === true })
+      h(BatchPanel, { call, enabled: state?.batchSupported === true }),
+      h('footer', { className: 'topic-page-foot' },
+        state?.hostVersion ? `后台 ${state.hostVersion}` : '后台版本未知',
+        UI.version ? ` · 前端 ${UI.version}` : ''
+      )
     );
   };
 }

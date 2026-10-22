@@ -9,7 +9,7 @@ import { settingsBridge, liveValue } from './settings-bridge.js';
 import { BatchOrganizer } from './batch.js';
 
 export const name = 'topic-for-each-turn';
-export const HOST_VERSION = '0.1.0-experimental.15';
+export const HOST_VERSION = '0.1.0-experimental.16';
 export const API_VERSION = 2;
 // connection.register reads owner.webServer; declare it on the owning plugin context.
 export const inject = ['connection', 'webServer', 'sessions', 'sessionQuery', 'llm', 'settings'];

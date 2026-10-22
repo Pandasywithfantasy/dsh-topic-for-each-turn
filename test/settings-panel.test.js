@@ -23,18 +23,34 @@ const submit = tree => find(tree, node => node.tag === 'form')[0].props.onSubmit
 async function harness(handler) {
   let cursor = 0, effects = [], slots = [], calls = [], updates = 0;
   const React = {
-    createElement: (tag, props, ...children) => ({ tag, props: props || {}, children: children.flat(Infinity) }),
+    createElement: (tag, props, ...children) => {
+      const flat = children.flat(Infinity);
+      return { tag, props: { ...(props || {}), children: flat }, children: flat };
+    },
     useRef(value) { const i = cursor++; slots[i] ??= { current: value }; return slots[i]; },
     useState(value) { const i = cursor++; slots[i] ??= { value: typeof value === 'function' ? value() : value }; return [slots[i].value, next => { updates++; slots[i].value = typeof next === 'function' ? next(slots[i].value) : next; }]; },
     useEffect(fn, deps) { const i = cursor++; if (!slots[i] || deps.some((value, j) => value !== slots[i].deps[j])) { slots[i]?.cleanup?.(); slots[i] = { deps }; effects.push(() => { slots[i].cleanup = fn(); }); } }
   };
   const sandbox = {};
   vm.runInNewContext(source + '\nglobalThis.factory = createSettingsPanel;', sandbox);
-  const Component = sandbox.factory(React, React.createElement);
+  // The official Button renders a native button; stand in for it so tests can
+  // assert on real elements without depending on the primitives package.
+  const Button = props => {
+    const { children = [], ...rest } = props;
+    return React.createElement('button', { type: 'button', ...rest }, ...(Array.isArray(children) ? children : [children]));
+  };
+  // Only the Button stand-in is expanded: the panels themselves stay unrendered
+  // here so these tests keep asserting the settings page's own tree.
+  const expandButtons = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (node.tag === Button) return expandButtons(Button(node.props));
+    return { ...node, children: node.children.map(expandButtons) };
+  };
+  const Component = sandbox.factory(React, React.createElement, { Button, version: 'test' });
   let call = async (...args) => { calls.push(args); return handler ? handler(...args) : initial(); };
   return {
     calls,
-    render() { cursor = 0; const tree = Component({ call }); effects.splice(0).forEach(effect => effect()); return tree; },
+    render() { cursor = 0; const tree = Component({ call }); effects.splice(0).forEach(effect => effect()); return expandButtons(tree); },
     unmount() { slots.forEach(slot => slot.cleanup?.()); },
     replaceCall(next) { call = next; },
     get updates() { return updates; }
@@ -84,7 +100,7 @@ test('save uses null session and exact config payload, then returns clean succes
   assert.deepEqual(JSON.parse(JSON.stringify(ui.calls.at(-1)[2])), { provider: 'one', model: 'alpha', reasoningEffort: 'medium', maxTokens: 512 });
   assert.equal(button(tree, '正在保存…').props.disabled, true);
   assert.equal(number(tree).props.disabled, true);
-  assert.equal(button(tree, '重新加载配置').props.disabled, true);
+  assert.equal(button(tree, '重新加载').props.disabled, true);
   pending.resolve({ ...initial(), config: { ...initial().config, maxTokens: 512 } }); await settle(); tree = ui.render();
   assert.match(text(tree), /已保存，后续主题请求使用新设置/);
   assert.equal(button(tree, '保存设置').props.disabled, true);
@@ -95,7 +111,7 @@ test('failed save keeps draft, exposes error, and allows retry', async () => {
   ui.render(); await settle(); let tree = ui.render();
   number(tree).props.onChange({ target: { value: '800' } }); tree = ui.render(); submit(tree); await settle(); tree = ui.render();
   assert.equal(number(tree).props.value, '800'); assert.equal(button(tree, '保存设置').props.disabled, false);
-  assert.match(text(tree), /错误：INVALID_REQUEST/); assert.match(text(tree), /不直接表示密钥失效/);
+  assert.match(text(tree), /INVALID_REQUEST/); assert.match(text(tree), /不直接表示密钥失效/);
 });
 
 test('provider chooses first model, model capabilities define effort and unsupported saves empty string', async () => {
@@ -112,10 +128,10 @@ test('provider chooses first model, model capabilities define effort and unsuppo
 test('unknown model remains selected with warning, reload discards draft', async () => {
   let state = initial(); state.config.model = 'unlisted';
   const ui = await harness(() => state); ui.render(); await settle(); let tree = ui.render();
-  assert.equal(select(tree, 1).props.value, 'unlisted'); assert.match(text(tree), /当前模型未列/);
+  assert.equal(select(tree, 1).props.value, 'unlisted'); assert.match(text(tree), /不在服务商模型列表中/);
   assert.equal(select(tree, 2).props.value, '');
   number(tree).props.onChange({ target: { value: '1000' } }); tree = ui.render();
-  state = initial(); button(tree, '重新加载配置').props.onClick(); await settle(); tree = ui.render();
+  state = initial(); button(tree, '重新加载').props.onClick(); await settle(); tree = ui.render();
   assert.equal(number(tree).props.value, '256'); assert.equal(select(tree, 1).props.value, 'alpha');
 });
 
