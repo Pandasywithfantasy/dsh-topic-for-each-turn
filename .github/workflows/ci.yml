@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 单元与契约测试
+        run: npm test
+      - name: 提交的客户端产物必须与源码一致
+        run: |
+          npm run build
+          git diff --exit-code lib/client.js
+      - name: 校验发布包内容
+        run: npm pack --dry-run

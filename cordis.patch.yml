@@ -1,0 +1,14 @@
+- insert:
+    - id: topic-for-each-turn
+      name: dsh-topic-for-each-turn
+      config:
+        # Empty by default. Open DSH Settings -> 轮次主题 (Turn topics) and choose
+        # one of the providers/models already configured in this DSH instance.
+        # Keep personal routes in your own profile patch, not in this file.
+        provider: ''
+        model: ''
+        reasoningEffort: low
+        maxTokens: 1024
+        continuity: true
+        maxInputChars: 12000
+        timeoutMs: 90000

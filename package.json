@@ -1,0 +1,66 @@
+{
+  "name": "dsh-topic-for-each-turn",
+  "version": "0.1.0-experimental.15",
+  "description": "Per-turn topic, conclusion, subject tags, and turn relation outline plugin for DeepSeek Harness (DSH)",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "turn-topic",
+    "outline"
+  ],
+  "license": "MIT",
+  "author": "django",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pandasywithfantasy/dsh-topic-for-each-turn.git"
+  },
+  "homepage": "https://github.com/Pandasywithfantasy/dsh-topic-for-each-turn#readme",
+  "bugs": {
+    "url": "https://github.com/Pandasywithfantasy/dsh-topic-for-each-turn/issues"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-home-paths": ">=0.2.0-rc.2 <0.3.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "dsh": ">=0.2.0-rc.2 <0.3.0"
+  }
+}
