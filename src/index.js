@@ -1,4 +1,5 @@
 import z from '@deepseek-ai/schemastery';
+import { stat } from 'node:fs/promises';
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm';
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths';
 import { TopicStore, TopicEngine, extractTurns, parseResult, SYSTEM, sessionId } from './core.js';
@@ -9,7 +10,7 @@ import { settingsBridge, liveValue } from './settings-bridge.js';
 import { BatchOrganizer } from './batch.js';
 
 export const name = 'topic-for-each-turn';
-export const HOST_VERSION = '0.1.0-experimental.16';
+export const HOST_VERSION = '0.1.0-experimental.17';
 export const API_VERSION = 2;
 // connection.register reads owner.webServer; declare it on the owning plugin context.
 export const inject = ['connection', 'webServer', 'sessions', 'sessionQuery', 'llm', 'settings'];
@@ -37,11 +38,25 @@ export function apply(ctx, config) {
     void task.finally(() => { if (configurationWrite === task) configurationWrite = null; }).catch(() => {});
     return task;
   };
+  const topicStore = new TopicStore(dshHomePath('storages', 'turn-topic-outline'));
+  // Opening the panel on a long session used to read its whole event log twice.
+  // This cheap stamp (live seq + cache file size/mtime) lets the panel poll
+  // without re-reading, and lets one generation skip a full re-read.
+  const sessionToken = async id => {
+    try {
+      const live = ctx.sessions?.get?.(id);
+      if (!live || typeof live.seq !== 'number') return null;
+      const file = await stat(topicStore.path(id)).catch(() => null);
+      return `${live.seq}:${file?.size ?? 0}:${Math.trunc(file?.mtimeMs ?? 0)}`;
+    } catch { return null; }
+  };
   const engine = new TopicEngine({
     continuity: current().continuity !== false,
-    store: new TopicStore(dshHomePath('storages', 'turn-topic-outline')),
+    store: topicStore,
     readTurns: async id => extractTurns((await ctx.sessionQuery.readSession(id)).events, current().maxInputChars),
+    extractTurns: events => extractTurns(events, current().maxInputChars),
     readSession: id => ctx.sessionQuery.readSession(id),
+    sessionToken,
     concurrency: 3,
     generate: async (turn, id, signal) => {
       const requestConfig = { ...current() };
@@ -106,7 +121,7 @@ export function apply(ctx, config) {
         return { ok: true, value: { ...modelSettingsState(settings, current(), stored, HOST_VERSION), batchSupported: true } };
       }
       const id = sessionId(payload?.sessionId);
-       if (endpoint === 'state') return { ok: true, value: { ...await engine.state(id), hostVersion: HOST_VERSION, apiVersion: API_VERSION, capabilities: ['organize', 'edit-text', 'incremental-organize', 'fork-inheritance', 'batch-organize'] } };
+       if (endpoint === 'state') return { ok: true, value: { ...await engine.state(id, typeof payload?.revision === 'string' ? payload.revision : null), hostVersion: HOST_VERSION, apiVersion: API_VERSION, capabilities: ['organize', 'edit-text', 'incremental-organize', 'fork-inheritance', 'batch-organize'] } };
       if (endpoint === 'generate') { await ctx.sessionQuery.readSession(id); return { ok: true, value: await engine.start(id) }; }
       if (endpoint === 'organize') { return { ok: true, value: await engine.start(id) }; }
       if (endpoint === 'enrich') { return { ok: true, value: await engine.start(id, undefined, true) }; }

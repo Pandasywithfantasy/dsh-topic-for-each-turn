@@ -1,6 +1,6 @@
 {
   "name": "dsh-topic-for-each-turn",
-  "version": "0.1.0-experimental.16",
+  "version": "0.1.0-experimental.17",
   "description": "Per-turn topic, conclusion, subject tags, and turn relation outline plugin for DeepSeek Harness (DSH)",
   "keywords": [
     "deepseek-harness",

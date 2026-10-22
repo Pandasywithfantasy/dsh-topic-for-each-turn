@@ -65,11 +65,27 @@ export class TopicStore {
   }
 }
 export class TopicEngine {
-  constructor({ store, readTurns, readSession, generate, continuity = true, concurrency = 3 }) {
-    Object.assign(this, { store, readTurns, readSession, generate, continuity });
+  // readTurns(id) and extractTurns(events) must derive the same turns. When a
+  // caller already holds one session snapshot, state()/start() reuse it instead
+  // of reading a long log twice; sessionToken() powers cheap unchanged polls.
+  constructor({ store, readTurns, readSession, extractTurns, sessionToken, generate, continuity = true, concurrency = 3 }) {
+    Object.assign(this, { store, readTurns, readSession, extractTurns, sessionToken, generate, continuity });
     this.jobs = new Map(); this.closed = false;
     this.concurrency = Math.max(1, Math.min(3, Number.isInteger(concurrency) ? concurrency : 3));
-    this.waiting = []; this.active = 0; this.tasks = new Set(); this.locks = new Map();
+    this.waiting = []; this.active = 0; this.tasks = new Set(); this.locks = new Map(); this.turnCache = new Map();
+  }
+  async turnsFrom(id, snapshot) {
+    if (!snapshot) return this.readTurns(id);
+    return this.extractTurns ? this.extractTurns(snapshot.events) : this.readTurns(id);
+  }
+  // A session log only grows, so (live seq + cache file stamp) identifies both
+  // new turns and cache edits without reading the log.
+  async revision(id) {
+    if (!this.sessionToken) return null;
+    const token = await this.sessionToken(id);
+    if (token === null || token === undefined) return null;
+    const job = this.jobs.get(id)?.status;
+    return `${token}|${job?.running ? `run:${job.done}` : 'idle'}`;
   }
   // Cache writes share a per-session lock. A slow model never holds this lock.
   withLock(id, work) {
@@ -94,17 +110,17 @@ export class TopicEngine {
   }
   // Only a seeded fork with a verified completed inherited prefix may reuse cache.
   // Copy once per missing entry, never alias files or propagate later parent edits.
-  async prepare(id, ancestors = new Set()) {
+  async prepare(id, ancestors = new Set(), snapshot) {
     sessionId(id);
     if (!this.readSession || this.closed || ancestors.has(id) || ancestors.size >= 32) return;
-    const child = await this.readSession(id), header = child.session;
+    const child = snapshot ?? await this.readSession(id), header = child.session;
     if (header?.isSeeded !== true || header.origin === 'subagent' || !header.parentSession ||
         !Number.isSafeInteger(child.inheritedEventCount) || child.inheritedEventCount <= 0) return;
     const parentId = sessionId(header.parentSession);
     if (parentId === id || ancestors.has(parentId)) return;
     // Once the child owns an entry at a position, inheritance cannot change it.
     // Avoid loading the entire ancestor chain on each panel status poll.
-    const childTurns = await this.readTurns(id), existing = await this.store.read(id);
+    const childTurns = await this.turnsFrom(id, snapshot), existing = await this.store.read(id);
     const prefix = extractTurns(child.events.filter(event => event.seq < child.inheritedEventCount));
     const missing = childTurns.filter(turn => prefix.some(p => p.seq === turn.seq && p.turn === turn.turn) && !existing.some(item => item.seq === turn.seq));
     if (!missing.length) return;
@@ -135,19 +151,50 @@ export class TopicEngine {
       if (next.length !== items.length) await this.store.save(id, next.sort((a, b) => a.seq - b.seq));
     });
   }
-  async state(id) {
-    sessionId(id); await this.prepare(id);
-    const [turns, items] = await Promise.all([this.readTurns(id), this.store.read(id)]);
+  async state(id, knownRevision) {
+    sessionId(id);
+    // An idle poll that proves nothing changed costs one cheap token comparison
+    // instead of re-reading the whole session log (22 MB in a long session).
+    const known = await this.revision(id);
+    if (known !== null && known === knownRevision) return { unchanged: true, revision: known };
+    // Only the job counter moved: the turns and cache are unchanged, so a running
+    // organize can report progress without re-sending every item.
+    if (known !== null && typeof knownRevision === 'string' && knownRevision.split('|')[0] === known.split('|')[0]) {
+      return { jobOnly: true, revision: known, job: this.jobs.get(id)?.status ?? { running: false } };
+    }
+    const token = this.sessionToken ? await this.sessionToken(id) : null;
+    const { turns, snapshot, cached } = await this.turnsFor(id, token);
+    // A non-fork session has nothing to inherit, so a cache hit needs no log read.
+    // Forks still verify inheritance, because a parent's cache can appear later.
+    if (!cached) await this.prepare(id, new Set(), snapshot);
+    else if (this.readSession && this.turnCache.get(id)?.fork) await this.prepare(id, new Set(), await this.readSession(id));
+    const items = await this.store.read(id);
     const job = this.jobs.get(id);
     return { items: turns.map(t => {
-      const cached = items.find(x => x.seq === t.seq && x.fingerprint === t.fingerprint);
+      const cachedItem = items.find(x => x.seq === t.seq && x.fingerprint === t.fingerprint);
       const error = job?.errors.get(t.seq);
       const preview = t.input.question.replace(/\s+/g, ' ').trim();
-      return { turn: t.turn, seq: t.seq, topic: cached?.topic ?? '待生成主题', preview: preview.length > 50 ? preview.slice(0, 49) + '…' : preview,
-        summary: cached?.summary ?? '', generated: !!cached, error,
-        subjects: cached?.subjects ?? [], ...visibleRelation(cached, turns, items), enriched: cached?.continuityVersion === CONTINUITY_VERSION, edited: !!items.find(item => item.seq === t.seq && item.edited),
-        status: cached ? 'generated' : job?.status.running && job.status.currentSeq === t.seq ? 'generating' : error ? 'failed' : 'missing' };
-    }), continuity: this.continuity, job: job?.status ?? { running: false } };
+      return { turn: t.turn, seq: t.seq, topic: cachedItem?.topic ?? '待生成主题', preview: preview.length > 50 ? preview.slice(0, 49) + '…' : preview,
+        summary: cachedItem?.summary ?? '', generated: !!cachedItem, error,
+        subjects: cachedItem?.subjects ?? [], ...visibleRelation(cachedItem, turns, items), enriched: cachedItem?.continuityVersion === CONTINUITY_VERSION, edited: !!items.find(item => item.seq === t.seq && item.edited),
+        status: cachedItem ? 'generated' : job?.status.running && job.status.currentSeq === t.seq ? 'generating' : error ? 'failed' : 'missing' };
+    }), continuity: this.continuity, job: job?.status ?? { running: false }, revision: await this.revision(id) };
+  }
+  // Reuse the extracted turns while the session token holds. This is what makes
+  // reopening, refreshing after an edit, and hovering the turn rail cheap.
+  async turnsFor(id, token) {
+    if (token !== null) {
+      const hit = this.turnCache.get(id);
+      if (hit && hit.token === token) return { turns: hit.turns, cached: true };
+    }
+    const snapshot = this.readSession ? await this.readSession(id) : undefined;
+    const turns = await this.turnsFrom(id, snapshot);
+    if (token !== null) {
+      const fork = snapshot?.session?.isSeeded === true;
+      this.turnCache.set(id, { token, turns, fork });
+      while (this.turnCache.size > 8) this.turnCache.delete(this.turnCache.keys().next().value);
+    }
+    return { turns, snapshot, cached: false };
   }
   async edit(id, seq, patch) {
     sessionId(id);
@@ -192,8 +239,9 @@ export class TopicEngine {
         for (const seq of selected) job.pending.delete(seq);
         job.controller.signal.throwIfAborted();
         if (canRun && !await canRun()) { job.status.skipped = true; return; }
-        await this.prepare(id);
-        const turns = await this.readTurns(id); let items = await this.store.read(id);
+        const snapshot = this.readSession ? await this.readSession(id) : undefined;
+        await this.prepare(id, new Set(), snapshot);
+        const turns = await this.turnsFrom(id, snapshot); let items = await this.store.read(id);
         const candidates = turns.filter(t => (job.all || selected.has(t.seq)) && !items.some(x => x.seq === t.seq && (x.edited || (x.fingerprint === t.fingerprint && !job.force && (!job.enrich || x.continuityVersion === CONTINUITY_VERSION))))).sort((a,b) => a.seq - b.seq);
         job.status.total = candidates.length;
         job.status.phase = 'processing';
@@ -203,10 +251,16 @@ export class TopicEngine {
           job.status.currentSeq = t.seq; job.status.currentTurn = t.turn; job.errors.delete(t.seq);
           try {
             const context = contextFor(t, turns, items, this.continuity);
+            // Session logs only append, so an unchanged token proves this turn's
+            // text did not change while the model ran; reading the whole log after
+            // every turn would dominate a long organize run.
+            const before = this.sessionToken ? await this.sessionToken(id) : null;
             const result = await this.generate({ ...t, context }, id, job.controller.signal);
             job.controller.signal.throwIfAborted();
-            const latest = await this.readTurns(id);
-            if (!latest.some(x => x.seq === t.seq && x.fingerprint === t.fingerprint)) throw new Error('本轮原文已变化，丢弃旧生成结果');
+            if (before === null || (await this.sessionToken(id)) !== before) {
+              const latest = await this.readTurns(id);
+              if (!latest.some(x => x.seq === t.seq && x.fingerprint === t.fingerprint)) throw new Error('本轮原文已变化，丢弃旧生成结果');
+            }
             const entry = { turn: t.turn, seq: t.seq, fingerprint: t.fingerprint, promptVersion: PROMPT_VERSION, ...parseResult(JSON.stringify(result)), ...normalizeContinuity(result, context, t), updatedAt: Date.now() };
             await this.withLock(id, async () => {
               job.controller.signal.throwIfAborted();

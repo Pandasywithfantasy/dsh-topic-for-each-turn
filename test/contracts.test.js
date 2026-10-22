@@ -53,7 +53,9 @@ test('a runtime that rejects unknown registration fields still opens the panel',
   // The fallback keeps the tab type registered, so the panel body has a matching kind.
   assert.deepEqual(accepted.map(x => x.kind), ['turn-topics']);
   assert.deepEqual(Object.keys(accepted[0]).sort(), ['id', 'kind', 'title']);
-  assert.match(warnings[0], /兼容声明/);
+  // It first drops only keepMounted, then falls back to the three-field form.
+  assert.match(warnings.join('\n'), /省略 keepMounted/);
+  assert.match(warnings.join('\n'), /兼容声明/);
   const button = entries[1].component({ sessionId: 's9' }); button.props.onClick(); assert.deepEqual(opens[0], ['s9', 'turn-topics']);
   assert.deepEqual(entries.map(x => x.options.name), ['settings.section', 'conversation.session.header.utilities', 'sidebar.right.pane.tab', 'sidebar.right.pane.tab.title']);
 });

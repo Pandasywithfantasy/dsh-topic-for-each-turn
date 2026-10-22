@@ -67,11 +67,16 @@ export function installPreview({ document, Observer, call, now = Date.now, sched
       if ((!cached || now() - cached.time >= 5000) && !pending.has(target.sessionId)) {
         const id = target.sessionId;
         // State only: hovering never calls generate. Revalidate DOM after every await.
-        const task = Promise.resolve().then(() => call('state', id)).then(value => {
-          if (closed) return;
-          cache.delete(id); cache.set(id, { value, time: now() });
-          while (cache.size > 16) cache.delete(cache.keys().next().value);
-        }).catch(() => { if (!closed) { cache.set(id, { time: now() }); for (const [tip, entry] of mounted) if (JSON.parse(entry.signature)[0] === id) restore(tip); } })
+        // The cached revision lets the host answer "unchanged" without re-reading a
+        // long session log on every hover.
+        const task = Promise.resolve().then(() => call('state', id, cached?.revision ? { revision: cached.revision } : {}))
+          .then(value => {
+            if (closed) return;
+            const keep = value.unchanged || value.jobOnly;
+            const entry = keep && cached?.value ? { value: cached.value, time: now(), revision: cached.revision } : { value, time: now(), revision: value.revision };
+            cache.delete(id); cache.set(id, entry);
+            while (cache.size > 16) cache.delete(cache.keys().next().value);
+          }).catch(() => { if (!closed) { cache.set(id, { time: now() }); for (const [tip, entry] of mounted) if (JSON.parse(entry.signature)[0] === id) restore(tip); } })
           .finally(() => { pending.delete(id); queue(); });
         pending.set(id, task);
       }
